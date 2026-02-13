@@ -37,6 +37,7 @@ class Install extends BaseController
 
                 $password = password_hash($admin_password, PASSWORD_DEFAULT);
                 $sqls[] = "REPLACE INTO `" . $mysql_prefix . "config` VALUES ('sys_key', '" . random(16) . "')";
+                $sqls[] = "REPLACE INTO `" . $mysql_prefix . "config` VALUES ('version', '" . addslashes(config('app.dbversion')) . "')";
                 $sqls[] = "INSERT INTO `" . $mysql_prefix . "user` (`username`,`password`,`level`,`regtime`,`lasttime`,`status`) VALUES ('" . addslashes($admin_username) . "', '$password', 2, NOW(), NOW(), 1)";
 
                 $success = 0;
@@ -100,6 +101,7 @@ class Install extends BaseController
 
                 $password = password_hash($admin_password, PASSWORD_DEFAULT);
                 $sqls[] = "REPLACE INTO `" . $mysql_prefix . "config` VALUES ('sys_key', '" . random(16) . "')";
+                $sqls[] = "REPLACE INTO `" . $mysql_prefix . "config` VALUES ('version', '" . addslashes(config('app.dbversion')) . "')";
                 $sqls[] = "INSERT INTO `" . $mysql_prefix . "user` (`username`,`password`,`level`,`regtime`,`lasttime`,`status`) VALUES ('" . addslashes($admin_username) . "', '$password', 2, NOW(), NOW(), 1)";
 
                 $success = 0;
