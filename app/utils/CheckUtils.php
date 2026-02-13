@@ -98,12 +98,117 @@ class CheckUtils
         return ['status' => $status, 'errmsg' => $errmsg, 'usetime' => $usetime];
     }
 
+    /**
+     * 通过 SOCKS5 代理建立到目标 host:port 的纯 TCP 连接（仅判断能否连通，不发送 HTTP 请求）
+     * 用于容灾 TCP 检测，避免对 SSH 等非 HTTP 端口发 GET 导致误判掉线
+     */
+    private static function socks5TcpConnect($proxy_server, $proxy_port, $proxy_user, $proxy_pwd, $target, $port, $timeout)
+    {
+        $errStr = null;
+        $ctx = stream_context_create([
+            'socket' => [
+                'timeout' => $timeout,
+                'connect_timeout' => $timeout,
+            ],
+        ]);
+        $fp = @stream_socket_client(
+            'tcp://' . $proxy_server . ':' . $proxy_port,
+            $errno,
+            $errmsg,
+            $timeout,
+            STREAM_CLIENT_CONNECT,
+            $ctx
+        );
+        if (!$fp) {
+            return ['status' => false, 'errmsg' => $errmsg ?: ('errno ' . $errno)];
+        }
+        stream_set_timeout($fp, $timeout);
+
+        // SOCKS5 协商：支持无认证(0)与用户名密码(2)
+        $authMethods = empty($proxy_user) && empty($proxy_pwd) ? "\x00" : "\x00\x02";
+        $buf = "\x05" . chr(strlen($authMethods)) . $authMethods;
+        if (fwrite($fp, $buf) !== strlen($buf)) {
+            fclose($fp);
+            return ['status' => false, 'errmsg' => 'proxy write handshake failed'];
+        }
+        $reply = fread($fp, 2);
+        if ($reply === false || strlen($reply) < 2 || $reply[0] !== "\x05") {
+            fclose($fp);
+            return ['status' => false, 'errmsg' => 'proxy handshake invalid'];
+        }
+        $method = ord($reply[1]);
+        if ($method === 0x02) {
+            $ulen = strlen($proxy_user);
+            $plen = strlen($proxy_pwd);
+            $buf = "\x01" . chr($ulen) . $proxy_user . chr($plen) . $proxy_pwd;
+            if (fwrite($fp, $buf) !== strlen($buf)) {
+                fclose($fp);
+                return ['status' => false, 'errmsg' => 'proxy auth write failed'];
+            }
+            $authReply = fread($fp, 2);
+            if ($authReply === false || strlen($authReply) < 2 || $authReply[1] !== "\x00") {
+                fclose($fp);
+                return ['status' => false, 'errmsg' => 'proxy auth failed'];
+            }
+        } elseif ($method !== 0x00) {
+            fclose($fp);
+            return ['status' => false, 'errmsg' => 'proxy unsupported auth method'];
+        }
+
+        // CONNECT 到 target:port（IPv4 或域名）
+        if (filter_var($target, FILTER_VALIDATE_IP)) {
+            $addr = "\x01" . inet_pton($target) . pack('n', $port);
+        } else {
+            $addr = "\x03" . chr(strlen($target)) . $target . pack('n', $port);
+        }
+        $buf = "\x05\x01\x00" . $addr;
+        if (fwrite($fp, $buf) !== strlen($buf)) {
+            fclose($fp);
+            return ['status' => false, 'errmsg' => 'proxy connect write failed'];
+        }
+        $connectReply = fread($fp, 4);
+        if ($connectReply === false || strlen($connectReply) < 4 || $connectReply[0] !== "\x05") {
+            fclose($fp);
+            return ['status' => false, 'errmsg' => 'proxy connect reply invalid'];
+        }
+        $rep = ord($connectReply[1]);
+        if ($rep !== 0x00) {
+            $repMsg = [
+                0x01 => 'general failure',
+                0x02 => 'connection not allowed',
+                0x03 => 'network unreachable',
+                0x04 => 'host unreachable',
+                0x05 => 'connection refused',
+                0x06 => 'TTL expired',
+                0x07 => 'command not supported',
+                0x08 => 'address type not supported',
+            ];
+            fclose($fp);
+            return ['status' => false, 'errmsg' => $repMsg[$rep] ?? ('proxy rep ' . $rep)];
+        }
+        $atyp = ord($connectReply[3]);
+        if ($atyp === 0x01) {
+            $left = 6; // IPv4 + port
+        } elseif ($atyp === 0x03) {
+            $len = ord(fread($fp, 1));
+            $left = $len + 2;
+        } else {
+            $left = 18; // IPv6 + port
+        }
+        if ($left > 0 && fread($fp, $left) === false) {
+            fclose($fp);
+            return ['status' => false, 'errmsg' => 'proxy connect reply read failed'];
+        }
+        fclose($fp);
+        return ['status' => true, 'errmsg' => null];
+    }
+
     public static function tcp($target, $ip, $port, $timeout, $proxy = false)
     {
         if (!empty($ip) && filter_var($ip, FILTER_VALIDATE_IP)) $target = $ip;
         if (str_ends_with($target, '.')) $target = substr($target, 0, -1);
 
-        // 使用代理时通过 SOCKS 检测（仅 SOCKS 支持 TCP 穿透）
+        // 使用代理时通过 SOCKS 做纯 TCP 连接检测（仅 SOCKS 支持 TCP 穿透；不发 HTTP 请求，避免非 HTTP 端口被误判掉线）
         if ($proxy) {
             $proxy_id = is_bool($proxy) ? 1 : intval($proxy);
             if ($proxy_id > 0) {
@@ -120,35 +225,17 @@ class CheckUtils
                     $proxy_pwd = config_get('proxy_pwd');
                     $proxy_type = config_get('proxy_type') ?: 'http';
                 }
-                if (!empty($proxy_server) && !empty($proxy_port) && in_array($proxy_type, ['sock4', 'sock5', 'sock5h'])) {
-                    $proxy_type_uri = match ($proxy_type) {
-                        'sock4' => 'socks4://',
-                        'sock5h' => 'socks5h://',
-                        default => 'socks5://',
-                    };
-                    if (($proxy_user ?? '') !== '' || ($proxy_pwd ?? '') !== '') {
-                        $proxy_type_uri .= $proxy_user . ':' . $proxy_pwd . '@';
+                if (!empty($proxy_server) && !empty($proxy_port)) {
+                    if ($proxy_type === 'sock4') {
+                        $starttime = getMillisecond();
+                        return ['status' => false, 'errmsg' => 'TCP检测仅支持 SOCKS5 代理', 'usetime' => getMillisecond() - $starttime];
                     }
-                    $proxy_type_uri .= $proxy_server . ':' . $proxy_port;
-                    $url = 'http://' . $target . ':' . $port . '/';
-                    $starttime = getMillisecond();
-                    try {
-                        $client = new Client([
-                            'timeout' => $timeout,
-                            'connect_timeout' => $timeout,
-                            'proxy' => $proxy_type_uri,
-                            'verify' => false,
-                            'http_errors' => false,
-                        ]);
-                        $client->request('GET', $url);
-                        $status = true;
-                        $errStr = null;
-                    } catch (GuzzleException $e) {
-                        $status = false;
-                        $errStr = guzzle_error($e);
+                    if (in_array($proxy_type, ['sock5', 'sock5h'])) {
+                        $starttime = getMillisecond();
+                        $ret = self::socks5TcpConnect($proxy_server, $proxy_port, $proxy_user ?? '', $proxy_pwd ?? '', $target, (int) $port, $timeout);
+                        $usetime = getMillisecond() - $starttime;
+                        return ['status' => $ret['status'], 'errmsg' => $ret['errmsg'], 'usetime' => $usetime];
                     }
-                    $usetime = getMillisecond() - $starttime;
-                    return ['status' => $status, 'errmsg' => $errStr, 'usetime' => $usetime];
                 }
             }
         }
