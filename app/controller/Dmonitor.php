@@ -91,6 +91,9 @@ class Dmonitor extends BaseController
                 'cycle' => input('post.cycle/d'),
                 'timeout' => input('post.timeout/d'),
                 'proxy' => input('post.proxy/d'),
+                'proxy_id' => input('post.proxy_id/d', 0),
+                'hook_enable' => input('post.hook_enable') == 'true' || input('post.hook_enable') == '1' ? 1 : 0,
+                'hook_cmd' => input('post.hook_cmd', null, 'trim'),
                 'cdn' => input('post.cdn') == 'true' || input('post.cdn') == '1' ? 1 : 0,
                 'remark' => input('post.remark', null, 'trim'),
                 'recordinfo' => input('post.recordinfo', null, 'trim'),
@@ -110,6 +113,23 @@ class Dmonitor extends BaseController
             if (Db::name('dmtask')->where('recordid', $task['recordid'])->find()) {
                 return json(['code' => -1, 'msg' => '当前容灾切换策略已存在']);
             }
+            if ($task['hook_enable'] == 1) {
+                if (empty($task['hook_cmd'])) {
+                    return json(['code' => -1, 'msg' => '已开启Hook时，Hook命令不能为空']);
+                }
+                if (preg_match("/\r|\n/", $task['hook_cmd'])) {
+                    return json(['code' => -1, 'msg' => 'Hook命令仅支持单行']);
+                }
+                if (strlen($task['hook_cmd']) > 512) {
+                    return json(['code' => -1, 'msg' => 'Hook命令过长（最长512字符）']);
+                }
+                if (!preg_match('/^\s*curl\s+/i', $task['hook_cmd'])) {
+                    return json(['code' => -1, 'msg' => 'Hook命令仅允许以curl开头的单行命令']);
+                }
+                if (preg_match('/[`]|\\$\\(|\\|\\||&&|[|;><]/', $task['hook_cmd'])) {
+                    return json(['code' => -1, 'msg' => 'Hook命令包含不安全字符']);
+                }
+            }
             Db::name('dmtask')->insert($task);
             return json(['code' => 0, 'msg' => '添加成功']);
         } elseif ($action == 'edit') {
@@ -128,6 +148,9 @@ class Dmonitor extends BaseController
                 'cycle' => input('post.cycle/d'),
                 'timeout' => input('post.timeout/d'),
                 'proxy' => input('post.proxy/d'),
+                'proxy_id' => input('post.proxy_id/d', 0),
+                'hook_enable' => input('post.hook_enable') == 'true' || input('post.hook_enable') == '1' ? 1 : 0,
+                'hook_cmd' => input('post.hook_cmd', null, 'trim'),
                 'cdn' => input('post.cdn') == 'true' || input('post.cdn') == '1' ? 1 : 0,
                 'remark' => input('post.remark', null, 'trim'),
                 'recordinfo' => input('post.recordinfo', null, 'trim'),
@@ -144,6 +167,29 @@ class Dmonitor extends BaseController
             }
             if (Db::name('dmtask')->where('recordid', $task['recordid'])->where('id', '<>', $id)->find()) {
                 return json(['code' => -1, 'msg' => '当前容灾切换策略已存在']);
+            }
+            if (!in_array($task['proxy_id'], [0, 1, 2])) {
+                $task['proxy_id'] = 0;
+            }
+            $task['proxy'] = $task['proxy_id'] == 1 ? 1 : 0;
+            if ($task['hook_enable'] == 1) {
+                if (empty($task['hook_cmd'])) {
+                    return json(['code' => -1, 'msg' => '已开启Hook时，Hook命令不能为空']);
+                }
+                if (preg_match("/\r|\n/", $task['hook_cmd'])) {
+                    return json(['code' => -1, 'msg' => 'Hook命令仅支持单行']);
+                }
+                if (strlen($task['hook_cmd']) > 512) {
+                    return json(['code' => -1, 'msg' => 'Hook命令过长（最长512字符）']);
+                }
+                if (!preg_match('/^\s*curl\s+/i', $task['hook_cmd'])) {
+                    return json(['code' => -1, 'msg' => 'Hook命令仅允许以curl开头的单行命令']);
+                }
+                if (preg_match('/[`]|\\$\\(|\\|\\||&&|[|;><]/', $task['hook_cmd'])) {
+                    return json(['code' => -1, 'msg' => 'Hook命令包含不安全字符']);
+                }
+            } else {
+                $task['hook_cmd'] = null;
             }
             Db::name('dmtask')->where('id', $id)->update($task);
             return json(['code' => 0, 'msg' => '修改成功']);

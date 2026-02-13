@@ -2,11 +2,11 @@
 {block name="title"}代理设置{/block}
 {block name="main"}
 <div class="row">
-<div class="col-xs-12 col-sm-8 col-lg-6 center-block" style="float: none;">
+<div class="col-xs-12 col-sm-10 col-lg-8 center-block" style="float: none;">
 <div class="panel panel-info">
-<div class="panel-heading"><h3 class="panel-title">代理服务器设置</h3></div>
+<div class="panel-heading"><h3 class="panel-title">代理服务器1设置</h3></div>
 <div class="panel-body">
-  <form onsubmit="return saveSetting(this)" method="post" class="form-horizontal" role="form">
+  <form onsubmit="return saveSetting(this)" method="post" class="form-horizontal" role="form" id="proxyForm1">
 	<div class="form-group">
 	  <label class="col-sm-3 control-label">代理IP</label>
 	  <div class="col-sm-9"><input type="text" name="proxy_server" value="{:config_get('proxy_server')}" class="form-control"/></div>
@@ -30,17 +30,58 @@
 	  <option value="https">HTTPS</option>
 	  <option value="sock4">SOCK4</option>
 	  <option value="sock5">SOCK5</option>
-	  <option value="sock5h">SOCK5H</option>
+	  <option value="sock5h">SOCKS5H</option>
 	  </select></div>
 	</div><br/>
 	<div class="form-group">
-	  <div class="col-sm-offset-3 col-sm-9"><input type="submit" name="submit" value="保存" class="btn btn-primary btn-block"/><br/>
-		<a href="javascript:proxytest()" class="btn btn-default btn-block">测试连通性</a></div>
+	  <div class="col-sm-offset-3 col-sm-9"><input type="submit" name="submit" value="保存代理1设置" class="btn btn-primary btn-block"/><br/>
+		<a href="javascript:proxytest(1)" class="btn btn-default btn-block">测试代理1连通性</a></div>
 	</div>
   </form>
 </div>
 <div class="panel-footer">
 为保证代理稳定性，建议在本机安装Xray，入站代理使用普通http协议，仅监听本地IP，出站代理使用加密协议连接其他服务器。
+</div>
+</div>
+
+<div class="panel panel-info" style="margin-top: 20px;">
+<div class="panel-heading"><h3 class="panel-title">代理服务器2设置</h3></div>
+<div class="panel-body">
+  <form onsubmit="return saveSetting2(this)" method="post" class="form-horizontal" role="form" id="proxyForm2">
+	<div class="form-group">
+	  <label class="col-sm-3 control-label">代理IP</label>
+	  <div class="col-sm-9"><input type="text" name="proxy_server_2" value="{:config_get('proxy_server_2')}" class="form-control"/></div>
+	</div><br/>
+	<div class="form-group">
+	  <label class="col-sm-3 control-label">代理端口</label>
+	  <div class="col-sm-9"><input type="text" name="proxy_port_2" value="{:config_get('proxy_port_2')}" class="form-control"/></div>
+	</div><br/>
+	<div class="form-group">
+	  <label class="col-sm-3 control-label">代理账号</label>
+	  <div class="col-sm-9"><input type="text" name="proxy_user_2" value="{:config_get('proxy_user_2')}" class="form-control" placeholder="没有请留空"/></div>
+	</div><br/>
+	<div class="form-group">
+	  <label class="col-sm-3 control-label">代理密码</label>
+	  <div class="col-sm-9"><input type="text" name="proxy_pwd_2" value="{:config_get('proxy_pwd_2')}" class="form-control" placeholder="没有请留空"/></div>
+	</div><br/>
+	<div class="form-group">
+	  <label class="col-sm-3 control-label">代理协议</label>
+	  <div class="col-sm-9"><select class="form-control" name="proxy_type_2" default="{:config_get('proxy_type_2')}">
+	  <option value="http">HTTP</option>
+	  <option value="https">HTTPS</option>
+	  <option value="sock4">SOCK4</option>
+	  <option value="sock5">SOCK5</option>
+	  <option value="sock5h">SOCKS5H</option>
+	  </select></div>
+	</div><br/>
+	<div class="form-group">
+	  <div class="col-sm-offset-3 col-sm-9"><input type="submit" name="submit" value="保存代理2设置" class="btn btn-primary btn-block"/><br/>
+		<a href="javascript:proxytest(2)" class="btn btn-default btn-block">测试代理2连通性</a></div>
+	</div>
+  </form>
+</div>
+<div class="panel-footer">
+代理2为可选配置，如果未配置，使用代理2的任务将自动回退到代理1。
 </div>
 </div>
 </div>
@@ -80,12 +121,40 @@ function saveSetting(obj){
 	});
 	return false;
 }
-function proxytest(){
-	var proxy_server = $("input[name='proxy_server']").val();
-	var proxy_port = $("input[name='proxy_port']").val();
-	var proxy_user = $("input[name='proxy_user']").val();
-	var proxy_pwd = $("input[name='proxy_pwd']").val();
-	var proxy_type = $("select[name='proxy_type']").val();
+function saveSetting2(obj){
+	var ii = layer.load(2, {shade:[0.1,'#fff']});
+	$.ajax({
+		type : 'POST',
+		url : '/system/set',
+		data : $(obj).serialize(),
+		dataType : 'json',
+		success : function(data) {
+			layer.close(ii);
+			if(data.code == 0){
+				layer.alert('代理2设置保存成功！', {
+					icon: 1,
+					closeBtn: false
+				}, function(){
+				  window.location.reload()
+				});
+			}else{
+				layer.alert(data.msg, {icon: 2})
+			}
+		},
+		error:function(data){
+            layer.close(ii);
+			layer.msg('服务器错误');
+		}
+	});
+	return false;
+}
+function proxytest(proxy_id){
+	var prefix = proxy_id == 2 ? '_2' : '';
+	var proxy_server = $("input[name='proxy_server" + prefix + "']").val();
+	var proxy_port = $("input[name='proxy_port" + prefix + "']").val();
+	var proxy_user = $("input[name='proxy_user" + prefix + "']").val();
+	var proxy_pwd = $("input[name='proxy_pwd" + prefix + "']").val();
+	var proxy_type = $("select[name='proxy_type" + prefix + "']").val();
 	if(proxy_server=='' || proxy_port==''){
 		layer.alert('代理服务器和端口不能为空！');
 		return false;
@@ -94,14 +163,14 @@ function proxytest(){
 	$.ajax({
 		type : 'POST',
 		url : '/system/proxytest',
-		data : {proxy_server:proxy_server, proxy_port:proxy_port, proxy_user:proxy_user, proxy_pwd:proxy_pwd, proxy_type:proxy_type},
+		data : {proxy_server:proxy_server, proxy_port:proxy_port, proxy_user:proxy_user, proxy_pwd:proxy_pwd, proxy_type:proxy_type, proxy_id:proxy_id},
 		dataType : 'json',
 		success : function(data) {
 			layer.close(ii);
 			if(data.code == 0){
-				layer.alert('连通性测试成功！', {icon: 1})
+				layer.alert('代理' + proxy_id + '连通性测试成功！', {icon: 1})
 			}else{
-				layer.alert('连通性测试失败：'+data.msg, {icon: 2})
+				layer.alert('代理' + proxy_id + '连通性测试失败：'+data.msg, {icon: 2})
 			}
 		},
 		error:function(data){

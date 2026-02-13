@@ -190,3 +190,13 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_sctask` (
 ALTER TABLE `dnsmgr_account`
 ADD COLUMN `config` text DEFAULT NULL,
 CHANGE COLUMN `ak` `name` varchar(255) NOT NULL;
+
+-- 二开：多代理与容灾 Hook
+ALTER TABLE `dnsmgr_dmtask`
+ADD COLUMN `proxy_id` tinyint(2) NOT NULL DEFAULT 0 COMMENT '0=不使用, 1=代理1, 2=代理2' AFTER `proxy`;
+ALTER TABLE `dnsmgr_dmtask`
+ADD COLUMN `hook_enable` tinyint(1) NOT NULL DEFAULT 0 COMMENT '切换备用解析成功后执行Hook命令' AFTER `proxy_id`;
+ALTER TABLE `dnsmgr_dmtask`
+ADD COLUMN `hook_cmd` varchar(512) DEFAULT NULL COMMENT 'Hook命令（单行，支持{ip}占位符）' AFTER `hook_enable`;
+UPDATE `dnsmgr_dmtask` SET `proxy_id` = 1 WHERE `proxy` = 1 AND `proxy_id` = 0;
+ALTER TABLE `dnsmgr_log` MODIFY COLUMN `data` TEXT DEFAULT NULL;

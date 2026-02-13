@@ -46,28 +46,37 @@ class CheckUtils
                 CURLOPT_RESOLVE => [$resolve]
             ];
         }
-        // 处理代理
+        // 处理代理（支持 proxy_id：0=不用, 1=代理1, 2=代理2）
         if ($proxy) {
-            $proxy_server = config_get('proxy_server');
-            $proxy_port = intval(config_get('proxy_port'));
-            $proxy_userpwd = config_get('proxy_user').':'.config_get('proxy_pwd');
-            $proxy_type = config_get('proxy_type');
-
-            if (!empty($proxy_server) && !empty($proxy_port)) {
-                match ($proxy_type) {
-                    'https' => $proxy_string = 'https://',
-                    'sock4' => $proxy_string = 'socks4://',
-                    'sock5' => $proxy_string = 'socks5://',
-                    'sock5h' => $proxy_string = 'socks5h://',
-                    default => $proxy_string = 'http://',
-                };
-
-                if ($proxy_userpwd != ':') {
-                    $proxy_string .= $proxy_userpwd . '@';
+            $proxy_id = is_bool($proxy) ? 1 : intval($proxy);
+            if ($proxy_id > 0) {
+                $suffix = $proxy_id == 2 ? '_2' : '';
+                $proxy_server = config_get('proxy_server' . $suffix);
+                $proxy_port = intval(config_get('proxy_port' . $suffix));
+                if ($proxy_id == 2 && (empty($proxy_server) || empty($proxy_port))) {
+                    $proxy_server = config_get('proxy_server');
+                    $proxy_port = intval(config_get('proxy_port'));
+                    $suffix = '';
                 }
+                $proxy_userpwd = config_get('proxy_user' . $suffix) . ':' . config_get('proxy_pwd' . $suffix);
 
-                $proxy_string .= $proxy_server . ':' . $proxy_port;
-                $options['proxy'] = $proxy_string;
+                if (!empty($proxy_server) && !empty($proxy_port)) {
+                    $proxy_type = config_get('proxy_type' . $suffix);
+                    match ($proxy_type) {
+                        'https' => $proxy_string = 'https://',
+                        'sock4' => $proxy_string = 'socks4://',
+                        'sock5' => $proxy_string = 'socks5://',
+                        'sock5h' => $proxy_string = 'socks5h://',
+                        default => $proxy_string = 'http://',
+                    };
+
+                    if ($proxy_userpwd != ':') {
+                        $proxy_string .= $proxy_userpwd . '@';
+                    }
+
+                    $proxy_string .= $proxy_server . ':' . $proxy_port;
+                    $options['proxy'] = $proxy_string;
+                }
             }
         }
 
@@ -89,10 +98,61 @@ class CheckUtils
         return ['status' => $status, 'errmsg' => $errmsg, 'usetime' => $usetime];
     }
 
-    public static function tcp($target, $ip, $port, $timeout)
+    public static function tcp($target, $ip, $port, $timeout, $proxy = false)
     {
         if (!empty($ip) && filter_var($ip, FILTER_VALIDATE_IP)) $target = $ip;
         if (str_ends_with($target, '.')) $target = substr($target, 0, -1);
+
+        // 使用代理时通过 SOCKS 检测（仅 SOCKS 支持 TCP 穿透）
+        if ($proxy) {
+            $proxy_id = is_bool($proxy) ? 1 : intval($proxy);
+            if ($proxy_id > 0) {
+                $suffix = $proxy_id == 2 ? '_2' : '';
+                $proxy_server = config_get('proxy_server' . $suffix);
+                $proxy_port = intval(config_get('proxy_port' . $suffix));
+                $proxy_user = config_get('proxy_user' . $suffix);
+                $proxy_pwd = config_get('proxy_pwd' . $suffix);
+                $proxy_type = config_get('proxy_type' . $suffix);
+                if ($proxy_id == 2 && (empty($proxy_server) || empty($proxy_port))) {
+                    $proxy_server = config_get('proxy_server');
+                    $proxy_port = intval(config_get('proxy_port'));
+                    $proxy_user = config_get('proxy_user');
+                    $proxy_pwd = config_get('proxy_pwd');
+                    $proxy_type = config_get('proxy_type') ?: 'http';
+                }
+                if (!empty($proxy_server) && !empty($proxy_port) && in_array($proxy_type, ['sock4', 'sock5', 'sock5h'])) {
+                    $proxy_type_uri = match ($proxy_type) {
+                        'sock4' => 'socks4://',
+                        'sock5h' => 'socks5h://',
+                        default => 'socks5://',
+                    };
+                    if (($proxy_user ?? '') !== '' || ($proxy_pwd ?? '') !== '') {
+                        $proxy_type_uri .= $proxy_user . ':' . $proxy_pwd . '@';
+                    }
+                    $proxy_type_uri .= $proxy_server . ':' . $proxy_port;
+                    $url = 'http://' . $target . ':' . $port . '/';
+                    $starttime = getMillisecond();
+                    try {
+                        $client = new Client([
+                            'timeout' => $timeout,
+                            'connect_timeout' => $timeout,
+                            'proxy' => $proxy_type_uri,
+                            'verify' => false,
+                            'http_errors' => false,
+                        ]);
+                        $client->request('GET', $url);
+                        $status = true;
+                        $errStr = null;
+                    } catch (GuzzleException $e) {
+                        $status = false;
+                        $errStr = guzzle_error($e);
+                    }
+                    $usetime = getMillisecond() - $starttime;
+                    return ['status' => $status, 'errmsg' => $errStr, 'usetime' => $usetime];
+                }
+            }
+        }
+
         if (!filter_var($target, FILTER_VALIDATE_IP) && checkDomain($target)) {
             $target = gethostbyname($target);
             if (!$target) return ['status' => false, 'errmsg' => 'DNS resolve failed', 'usetime' => 0];

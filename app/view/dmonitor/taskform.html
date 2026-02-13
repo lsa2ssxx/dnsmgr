@@ -58,6 +58,20 @@
             <input type="text" name="backup_value" v-model="set.backup_value" placeholder="支持填写IP或CNAME地址" class="form-control" required>
         </div>
     </div>
+    <div class="form-group" v-show="set.type==1||set.type==2">
+        <label class="col-sm-3 control-label no-padding-right">切换备用Hook</label>
+        <div class="col-sm-6">
+            <div class="checkbox">
+                <label>
+                    <input type="checkbox" v-model="set.hook_enable"> 切换到备用/暂停解析成功后执行命令（可选{ip}占位符）
+                </label>
+            </div>
+            <textarea v-show="set.hook_enable" v-model="set.hook_cmd" rows="3" class="form-control" placeholder='示例：curl -s -X POST "https://xxx/v1/aodun/unsetbh" -H "token: xxxxx" -d "ip={ip}"'></textarea>
+            <div class="help-block" style="margin-top: 5px; color: #999; font-size: 12px;" v-show="set.hook_enable">
+                <i class="fa fa-info-circle"></i> 仅支持单行curl命令；{ip}可选；不支持管道/重定向/多命令。
+            </div>
+        </div>
+    </div>
     <div class="form-group" v-show="set.type==2&&dnstype=='cloudflare'">
         <div class="col-sm-offset-3 col-sm-7">
             <div class="checkbox">
@@ -93,15 +107,21 @@
             <input type="text" name="checkurl" v-model="set.checkurl" placeholder="填写以http(s)://开头的完整地址，http状态码须为2xx/3xx" class="form-control" data-bv-uri="true" required>
         </div>
     </div>
-    <div class="form-group" v-show="set.type<=2&&set.checktype==2">
-        <label class="col-sm-3 control-label no-padding-right">使用代理请求</label>
+    <div class="form-group" v-show="set.type<=2&&(set.checktype==1||set.checktype==2)">
+        <label class="col-sm-3 control-label no-padding-right">使用代理</label>
         <div class="col-sm-6">
             <label class="radio-inline">
-                <input type="radio" name="proxy" value="0" v-model="set.proxy"> 否
+                <input type="radio" name="proxy_id" value="0" v-model="set.proxy_id"> 不使用
             </label>
             <label class="radio-inline">
-                <input type="radio" name="proxy" value="1" v-model="set.proxy"> 是
+                <input type="radio" name="proxy_id" value="1" v-model="set.proxy_id"> 代理1
             </label>
+            <label class="radio-inline">
+                <input type="radio" name="proxy_id" value="2" v-model="set.proxy_id"> 代理2
+            </label>
+            <div class="help-block" style="margin-top: 5px; color: #999; font-size: 12px;" v-show="set.checktype==1">
+                <i class="fa fa-info-circle"></i> TCP检测仅支持SOCKS代理
+            </div>
         </div>
     </div>
     <div class="form-group" v-show="set.type<=2&&set.checktype>0">
@@ -177,7 +197,10 @@ new Vue({
             timeout: 2,
             cycle: 3,
             proxy: 0,
+            proxy_id: 0,
             cdn: 0,
+            hook_enable: 0,
+            hook_cmd: '',
         },
         dnstype: null,
         domainList: domainList,
@@ -214,6 +237,9 @@ new Vue({
             Object.keys(info).forEach((key) => {
                 this.$set(this.set, key, info[key])
             })
+            if (!this.set.proxy_id && this.set.proxy !== undefined) {
+                this.set.proxy_id = this.set.proxy == 1 ? 1 : 0;
+            }
             var recordinfo = JSON.parse(this.set.recordinfo);
             this.recordList = [{RecordId:this.set.recordid, Value:this.set.main_value, Line:recordinfo.Line, LineName:recordinfo.LineName, TTL:recordinfo.TTL}];
         }
